@@ -126,3 +126,19 @@ StudySyncRemod includes two self-provisioning demo identities. The corresponding
   - Role in the current UI/backend schema: Professor
 
 These are intentionally public demo credentials. The login Edge Function restores the expected demo password on valid demo login so the shared demonstration account remains recoverable.
+
+
+## Secure administrator password reset
+
+StudySyncRemod now includes a server-side administrator password reset workflow:
+
+- trusted admins are identified by the protected `profiles.is_admin` flag
+- the sample Professor `PROF-001` is the default demo administrator
+- admins can reset a Student or Professor password from **Settings**
+- temporary passwords must be at least 12 characters and include uppercase, lowercase, a number, and a symbol
+- password reset execution happens only inside the JWT-protected `account-security` Edge Function
+- plaintext passwords are never written to application tables or audit logs
+- reset events are recorded in `password_reset_audit` without storing the password
+- reset users receive `must_change_password = true` and are forced to change their password before using the rest of StudySync
+- client access to the password reset audit table is explicitly denied by RLS and grants
+- the legacy demo-login endpoint is disabled; production login uses `secure-id-login`
