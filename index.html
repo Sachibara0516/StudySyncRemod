@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StudySync</title>
+    <link rel="stylesheet" href="styles/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <!-- Main Window -->
+    <main id="main-window" class="screen">
+        <h1 class="title">Study <b style="color:#3366ff;">Sync.</b></h1>
+        <div class="role-buttons">
+            <button id="professor-btn" class="role-button" aria-label="Professor login">
+                👩‍🏫<br />Professor
+            </button>
+            <button id="student-btn" class="role-button" aria-label="Student login">
+                🎓<br />Student
+            </button>
+        </div>
+    </main>
+
+    <!-- Login Window -->
+    <section id="login-window" class="screen hidden" aria-live="polite">
+        <h2 id="login-title">Login</h2>
+        <form id="login-form" aria-describedby="login-desc">
+            <label for="id-input" id="login-id-label">ID:</label>
+            <input type="text" id="id-input" autocomplete="username" required aria-required="true" aria-describedby="login-id-format" />
+            <small id="login-id-format" class="input-hint"></small>
+
+            <label for="password-input">Password:</label>
+            <div class="password-container">
+                <input type="password" id="password-input" autocomplete="current-password" required aria-required="true" />
+                <button type="button" id="toggle-password" aria-label="Toggle password visibility" tabindex="-1">👁️</button>
+            </div>
+
+            <div class="remember-forgot-container">
+                <label><input type="checkbox" id="remember-me" /> Remember me?</label>
+                <a href="#" target="_blank" rel="noopener">Forgot password?</a>
+            </div>
+
+            <button type="submit" id="login-submit">Login</button>
+            <button type="button" id="login-back">Back</button>
+        </form>
+        <div id="login-message" role="alert" aria-live="assertive"></div>
+    </section>
+
+    <!-- Welcome Window -->
+    <section id="welcome-window" class="screen hidden" aria-live="polite">
+        <div class="welcome-content">
+            <div class="welcome-icon" aria-hidden="true">👋</div>
+            <h2>Welcome!</h2>
+            <p>Student Number: <strong id="welcome-student-no"></strong></p>
+            <p>You have successfully logged in.<br />Enjoy your session!</p>
+            <button id="welcome-continue">Continue</button>
+        </div>
+    </section>
+
+    <!-- Dashboard Window -->
+    <section id="dashboard-window" class="screen hidden" aria-live="polite">
+        <aside id="sidebar" role="navigation" aria-label="Main menu">
+            <div class="logo">🎓<br /><strong>StudySync</strong></div>
+            <nav>
+                <button class="sidebar-btn active" data-page="Dashboard">Dashboard</button>
+                <button class="sidebar-btn" data-page="Class">Class</button>
+                <button class="sidebar-btn" data-page="Calendar">Calendar</button>
+                <button class="sidebar-btn" data-page="Progress">Progress</button>
+                <button class="sidebar-btn" data-page="Group">Group</button>
+                <button class="sidebar-btn" data-page="Setting">Setting</button>
+            </nav>
+            <button id="logout-btn" class="logout-btn">Back</button>
+        </aside>
+        <main id="content-area" tabindex="0" aria-live="polite">
+            <!-- Pages are displayed here -->
+        </main>
+    </section>
+
+    <!-- Templates for pages -->
+
+    <template id="page-dashboard-template">
+        <div class="dashboard-overview">
+            <section class="left-panel">
+                <h3>📅 Calendar Preview</h3>
+                <div id="dashboard-calendar"></div>
+                <h3>📈 Weekly Score Snapshot</h3>
+                <canvas id="dashboard-graph" width="740" height="220" aria-label="Weekly score graph"></canvas>
+            </section>
+            <section class="right-panel">
+                <h3>📌 Today's Tasks</h3>
+                <ul id="dashboard-tasks" class="task-list" tabindex="0" aria-label="Today's tasks"></ul>
+
+                <h3>⏳ Upcoming Activities</h3>
+                <ul id="dashboard-upcoming" class="task-list" tabindex="0" aria-label="Upcoming activities"></ul>
+
+                <h3>👥 Group Updates</h3>
+                <ul id="dashboard-group-updates" class="task-list" tabindex="0" aria-label="Group updates"></ul>
+
+                <h3>📢 Teacher Posts & Announcements</h3>
+                <ul id="dashboard-announcements" class="task-list" tabindex="0" aria-label="Teacher announcements"></ul>
+            </section>
+        </div>
+    </template>
+
+    <template id="page-class-template">
+        <section class="class-page">
+            <h2>Select a Subject</h2>
+            <div class="subjects-container" role="list" aria-label="Subjects">
+                <!-- Buttons will be created by script -->
+            </div>
+        </section>
+    </template>
+
+    <template id="page-subject-detail-template">
+        <section class="subject-detail">
+            <h2 id="subject-detail-title"></h2>
+            <div class="tabs" role="tablist" aria-label="Sections of subject details">
+                <!-- Tabs and content managed by script -->
+            </div>
+            <button id="subject-back-btn" class="back-btn">Back to Class</button>
+        </section>
+    </template>
+
+    <template id="page-calendar-template">
+        <section class="calendar-page">
+            <h2>📅 Calendar & Task Schedule</h2>
+            <div class="calendar-layout">
+                <div id="calendar-widget" aria-label="Calendar"></div>
+                <section id="todo-section" aria-label="To-do tasks and activities">
+                    <h3>To-do</h3>
+                    <ul id="todo-list" class="task-list" tabindex="0" aria-label="Today's to-do tasks"></ul>
+                        <div style="display: flex; gap: 8px; margin-top: 12px;">
+                            <button id="todo-add-btn" class="add-btn" aria-label="Add new to-do task">➕ New To-do</button>
+                            <button id="todo-delete-btn" class="danger-btn" aria-label="Delete selected to-do task" disabled>🗑 Delete Task</button>
+                        </div>
+                    <h3>Incoming Activities</h3>
+                    <ul id="incoming-activities" class="task-list" tabindex="0" aria-label="Incoming activities"></ul>
+                </section>
+            </div>
+        </section>
+    </template>
+
+    <template id="page-progress-template">
+        <section class="progress-page">
+            <h2>📊 Progress Tracker</h2>
+            <label for="progress-filter" class="visually-hidden">Filter progress</label>
+            <select id="progress-filter" aria-label="Select progress time filter"></select>
+            <ul id="progress-activity-list" class="task-list" tabindex="0" aria-label="Progress activities"></ul>
+            <h3>📈 Performance Trend</h3>
+            <canvas id="progress-chart" width="600" height="250" aria-label="Performance trend graph"></canvas>
+        </section>
+    </template>
+
+    <template id="page-setting-template">
+        <section class="settings-page" aria-label="Settings">
+            <h2>⚙️ Settings</h2>
+            <form id="settings-form">
+                <label for="display-name">Display Name</label>
+                <input type="text" id="display-name" name="display-name" placeholder="Enter your display name" />
+
+                <fieldset>
+                    <legend>Change Password</legend>
+
+                    <label for="old-password">Old Password</label>
+                    <div class="password-container">
+                        <input type="password" id="old-password" name="old-password" placeholder="Old Password" />
+                        <button type="button" class="toggle-pass-btn" aria-label="Toggle old password visibility">👁️</button>
+                    </div>
+
+                    <label for="new-password">New Password</label>
+                    <div class="password-container">
+                        <input type="password" id="new-password" name="new-password" placeholder="New Password" />
+                        <button type="button" class="toggle-pass-btn" aria-label="Toggle new password visibility">👁️</button>
+                    </div>
+
+                    <button type="button" id="update-password-btn" class="primary-btn">Update Password</button>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Notification Preferences</legend>
+                    <label><input type="checkbox" id="email-notif" /> Enable Email Notifications</label>
+                </fieldset>
+
+                <button type="button" id="save-settings-btn" class="primary-btn">Save Settings</button>
+            </form>
+        </section>
+    </template>
+
+    <template id="page-group-initial-template">
+        <section class="group-page">
+            <h2>👥 Group Collaboration Spaces</h2>
+            <div class="group-create">
+                <label for="new-group-name" class="visually-hidden">Enter new group name</label>
+                <input type="text" id="new-group-name" placeholder="Enter new group name..." aria-label="Enter new group name"/>
+                <button id="create-group-btn" class="primary-btn">➕ Create Group</button>
+            </div>
+            <ul id="group-list" class="group-list" tabindex="0" aria-label="List of groups"></ul>
+        </section>
+    </template>
+
+    <template id="page-group-details-template">
+        <section class="group-details">
+            <header class="group-details-header">
+                <h2 id="group-details-name"></h2>
+                <button id="back-to-groups" class="secondary-btn">Back to Groups</button>
+            </header>
+
+            <section class="group-members">
+                <h3>👥 Members</h3>
+                <ul id="group-member-list" class="member-list" tabindex="0" aria-label="List of group members"></ul>
+                <div class="member-actions">
+                    <input type="text" id="invite-member-id" placeholder="Enter student ID (e.g., 22-12345)" aria-label="Invite member by student ID" />
+                    <button id="invite-member-btn" class="primary-btn">➕ Invite Member</button>
+                    <button id="leave-group-btn" class="danger-btn">🚪 Leave Group</button>
+                </div>
+            </section>
+
+            <section class="group-files">
+                <h3>📂 Shared Files</h3>
+                <ul id="group-file-list" class="file-list" tabindex="0" aria-label="List of shared files"></ul>
+                <div class="file-actions">
+                    <input type="file" id="upload-file-input" aria-label="Upload a file to group" />
+                    <button id="upload-file-btn" class="primary-btn">⬆ Upload File</button>
+                    <button id="delete-file-btn" class="danger-btn" disabled>🗑 Delete File</button>
+                </div>
+            </section>
+
+            <section class="group-chat">
+                <h3>💬 Group Chat</h3>
+                <ul id="group-chat-list" class="chat-list" tabindex="0" aria-label="Group chat messages"></ul>
+                <div class="chat-input-area">
+                    <input type="text" id="group-chat-input" placeholder="Type your message here..." aria-label="Type your message here" />
+                    <button id="send-chat-btn" class="primary-btn">Send</button>
+                </div>
+            </section>
+
+            <button id="delete-group-btn" class="danger-btn delete-group-btn">⛔ Delete Group</button>
+        </section>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="scripts/script.js" type="module"></script>
+</body>
+</html>
