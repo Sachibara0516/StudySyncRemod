@@ -576,7 +576,7 @@ class StudySyncBackend {
     const { data: securityData, error: securityError } = await this.client.functions.invoke("account-security", {
       body: { action: "mark_changed" }
     });
-    if (securityError || data?.error) {
+    if (securityError || securityData?.error) {
       console.warn("Password changed but security state could not be cleared:", securityError || securityData?.error);
     } else if (this.profile) {
       this.profile.must_change_password = false;
