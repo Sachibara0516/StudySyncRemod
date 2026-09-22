@@ -65,9 +65,17 @@ class StudySyncBackend {
       }
     }
 
-    this.allowOfflineDemo = config?.allowOfflineDemo !== false;
-    const url = config?.supabaseUrl?.trim();
-    const key = config?.supabasePublishableKey?.trim();
+    // Public Supabase project configuration. Publishable keys are safe in browser clients
+    // when Data API grants and RLS are correctly configured.
+    config = {
+      supabaseUrl: config?.supabaseUrl || "https://ttymifynuwkcaxmxgxrh.supabase.co",
+      supabasePublishableKey: config?.supabasePublishableKey || "sb_publishable_xhUmMoLk7Kn_SBfi3uZkXQ_HKbZEOYY",
+      allowOfflineDemo: config?.allowOfflineDemo ?? false
+    };
+
+    this.allowOfflineDemo = config.allowOfflineDemo;
+    const url = config.supabaseUrl.trim();
+    const key = config.supabasePublishableKey.trim();
 
     if (!url || !key) {
       console.warn("StudySync is running in offline demo mode because Supabase is not configured.");
