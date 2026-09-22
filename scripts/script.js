@@ -223,7 +223,14 @@ welcomeContinueBtn.addEventListener('click', () => {
 
 // Sidebar navigation
 sidebarButtons.forEach(btn => {
-    btn.addEventListener('click', () => displayPage(btn.dataset.page));
+    btn.addEventListener('click', () => {
+        if (backend.profile?.must_change_password && btn.dataset.page !== "Setting") {
+            alert("Your password was reset by an administrator. Change it before continuing.");
+            displayPage("Setting");
+            return;
+        }
+        displayPage(btn.dataset.page);
+    });
 });
 
 logoutBtn.addEventListener('click', logout);
@@ -235,6 +242,9 @@ function setActiveSidebarButton(pageName) {
 }
 
 function displayPage(pageName) {
+    if (backend.profile?.must_change_password && pageName !== "Setting") {
+        pageName = "Setting";
+    }
     setActiveSidebarButton(pageName);
     switch (pageName) {
         case "Dashboard":
@@ -1322,6 +1332,128 @@ async function renderSettingsPage() {
         }
     });
 
+    if (backend.profile?.is_admin) {
+        const settingsForm = clone.querySelector('#settings-form');
+        const adminFieldset = document.createElement('fieldset');
+        const legend = document.createElement('legend');
+        legend.textContent = 'Administrator Password Reset';
+        adminFieldset.appendChild(legend);
+
+        const targetLabel = document.createElement('label');
+        targetLabel.setAttribute('for', 'admin-reset-target');
+        targetLabel.textContent = 'Student or Professor ID';
+        adminFieldset.appendChild(targetLabel);
+
+        const targetInput = document.createElement('input');
+        targetInput.type = 'text';
+        targetInput.id = 'admin-reset-target';
+        targetInput.placeholder = 'e.g., 22-12345 or PROF-001';
+        targetInput.autocomplete = 'off';
+        adminFieldset.appendChild(targetInput);
+
+        const passwordLabel = document.createElement('label');
+        passwordLabel.setAttribute('for', 'admin-reset-password');
+        passwordLabel.textContent = 'Temporary Password';
+        adminFieldset.appendChild(passwordLabel);
+
+        const passwordRow = document.createElement('div');
+        passwordRow.className = 'password-container';
+
+        const tempPasswordInput = document.createElement('input');
+        tempPasswordInput.type = 'password';
+        tempPasswordInput.id = 'admin-reset-password';
+        tempPasswordInput.autocomplete = 'new-password';
+        tempPasswordInput.placeholder = '12+ chars, upper/lower/number/symbol';
+
+        const showTempBtn = document.createElement('button');
+        showTempBtn.type = 'button';
+        showTempBtn.className = 'toggle-pass-btn';
+        showTempBtn.setAttribute('aria-label', 'Toggle temporary password visibility');
+        showTempBtn.textContent = '👁️';
+
+        passwordRow.appendChild(tempPasswordInput);
+        passwordRow.appendChild(showTempBtn);
+        adminFieldset.appendChild(passwordRow);
+
+        const generateBtn = document.createElement('button');
+        generateBtn.type = 'button';
+        generateBtn.className = 'secondary-btn';
+        generateBtn.textContent = 'Generate Temporary Password';
+
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'primary-btn';
+        resetBtn.textContent = 'Reset User Password';
+
+        adminFieldset.appendChild(generateBtn);
+        adminFieldset.appendChild(document.createTextNode(' '));
+        adminFieldset.appendChild(resetBtn);
+
+        const status = document.createElement('p');
+        status.setAttribute('aria-live', 'polite');
+        adminFieldset.appendChild(status);
+
+        showTempBtn.addEventListener('click', () => {
+            tempPasswordInput.type = tempPasswordInput.type === 'password' ? 'text' : 'password';
+            tempPasswordInput.focus();
+        });
+
+        function generateTemporaryPassword() {
+            const lower = 'abcdefghijkmnopqrstuvwxyz';
+            const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+            const digits = '23456789';
+            const symbols = '!@#$%^&*';
+            const all = lower + upper + digits + symbols;
+            const bytes = crypto.getRandomValues(new Uint8Array(16));
+            const chars = [
+                lower[bytes[0] % lower.length],
+                upper[bytes[1] % upper.length],
+                digits[bytes[2] % digits.length],
+                symbols[bytes[3] % symbols.length]
+            ];
+            for (let i = 4; i < bytes.length; i++) chars.push(all[bytes[i] % all.length]);
+            for (let i = chars.length - 1; i > 0; i--) {
+                const j = bytes[i % bytes.length] % (i + 1);
+                [chars[i], chars[j]] = [chars[j], chars[i]];
+            }
+            return chars.join('');
+        }
+
+        generateBtn.addEventListener('click', () => {
+            tempPasswordInput.value = generateTemporaryPassword();
+            tempPasswordInput.type = 'text';
+            status.textContent = 'Temporary password generated. Share it securely with the user.';
+        });
+
+        resetBtn.addEventListener('click', async () => {
+            const targetId = targetInput.value.trim();
+            const temporaryPassword = tempPasswordInput.value;
+            if (!targetId || !temporaryPassword) {
+                alert('Enter the user ID and a temporary password.');
+                return;
+            }
+            if (!confirm(`Reset the password for ${targetId}? The user will be required to change it after signing in.`)) return;
+
+            resetBtn.disabled = true;
+            status.textContent = 'Resetting password...';
+            try {
+                const result = await backend.adminResetPassword(targetId, temporaryPassword);
+                status.textContent = `Password reset for ${result.target_institution_id}. A password change is required at next login.`;
+                alert('Password reset successfully. Give the temporary password to the user through a secure channel.');
+                targetInput.value = '';
+                tempPasswordInput.value = '';
+                tempPasswordInput.type = 'password';
+            } catch (error) {
+                status.textContent = error?.message || 'Unable to reset password.';
+                alert(status.textContent);
+            } finally {
+                resetBtn.disabled = false;
+            }
+        });
+
+        settingsForm.insertBefore(adminFieldset, saveBtn);
+    }
+
     saveBtn.addEventListener('click', async () => {
         const nextSettings = {
             displayName: displayNameInput.value.trim().slice(0, 120),
@@ -1697,7 +1829,12 @@ async function logout() {
 
 function showDashboard() {
     showScreen(dashboardWindow);
-    displayPage("Dashboard"); // optional: loads the default dashboard content
+    if (backend.profile?.must_change_password) {
+        alert("Your password was reset by an administrator. Change it before continuing.");
+        displayPage("Setting");
+    } else {
+        displayPage("Dashboard");
+    }
 }
 
 
