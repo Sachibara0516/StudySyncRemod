@@ -91,7 +91,9 @@ create index if not exists assignments_owner_idx on public.assignments(owner_id)
 create index if not exists groups_created_by_idx on public.groups(created_by);
 create index if not exists group_members_user_idx on public.group_members(user_id, group_id);
 create index if not exists group_files_group_idx on public.group_files(group_id, uploaded_at);
+create index if not exists group_files_uploader_idx on public.group_files(uploader_id);
 create index if not exists group_messages_group_created_idx on public.group_messages(group_id, created_at);
+create index if not exists group_messages_sender_idx on public.group_messages(sender_id);
 
 create or replace function private.set_updated_at()
 returns trigger
@@ -354,65 +356,7 @@ begin
 end;
 $$;
 
-create or replace function public.invite_group_member(
-  p_group_id uuid,
-  p_institution_id text
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  v_caller uuid := (select auth.uid());
-  v_target public.profiles;
-begin
-  if v_caller is null then
-    raise exception 'Authentication required';
-  end if;
 
-  if not exists (
-    select 1
-    from public.groups g
-    where g.id = p_group_id
-      and g.created_by = v_caller
-  ) and not exists (
-    select 1
-    from public.group_members gm
-    where gm.group_id = p_group_id
-      and gm.user_id = v_caller
-      and gm.role = 'admin'
-  ) then
-    raise exception 'Only a group administrator can invite members';
-  end if;
-
-  select *
-    into v_target
-  from public.profiles p
-  where p.institution_id = trim(p_institution_id)
-    and p.role = 'student'
-  limit 1;
-
-  if v_target.id is null then
-    raise exception 'Student not found';
-  end if;
-
-  insert into public.group_members(group_id, user_id, institution_id, role)
-  values (p_group_id, v_target.id, v_target.institution_id, 'member')
-  on conflict (group_id, user_id) do nothing;
-
-  return jsonb_build_object(
-    'user_id', v_target.id,
-    'institution_id', v_target.institution_id,
-    'display_name', v_target.display_name
-  );
-end;
-$$;
-
-revoke all on function public.create_study_group(text) from public, anon;
-revoke all on function public.invite_group_member(uuid, text) from public, anon;
-grant execute on function public.create_study_group(text) to authenticated;
-grant execute on function public.invite_group_member(uuid, text) to authenticated;
 
 insert into storage.buckets (id, name, public, file_size_limit)
 values
