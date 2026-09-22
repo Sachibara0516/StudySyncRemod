@@ -463,12 +463,16 @@ with check (
   and (select private.is_group_member(((storage.foldername(name))[1])::uuid))
 );
 
+drop policy if exists group_files_objects_delete_self_or_admin on storage.objects;
 drop policy if exists group_files_objects_delete_self on storage.objects;
-create policy group_files_objects_delete_self on storage.objects
+create policy group_files_objects_delete_self_or_admin on storage.objects
 for delete to authenticated
 using (
   bucket_id = 'group-files'
-  and (storage.foldername(name))[2] = (select auth.uid())::text
+  and (
+    (storage.foldername(name))[2] = (select auth.uid())::text
+    or (select private.is_group_admin(((storage.foldername(name))[1])::uuid))
+  )
 );
 
 do $$
