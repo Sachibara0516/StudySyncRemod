@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
 
   let { data: profile, error: profileError } = await admin
     .from("profiles")
-    .select("id,email,role,institution_id")
+    .select("id,email,role,institution_id,is_admin,must_change_password")
     .eq("institution_id", institutionId)
     .eq("role", role)
     .maybeSingle();
@@ -105,7 +105,9 @@ Deno.serve(async (req) => {
       institution_id: institutionId,
       role,
       display_name: demo.display_name,
-      email_notifications: false
+      email_notifications: false,
+      is_admin: institutionId === "PROF-001" && role === "professor",
+      must_change_password: false
     });
 
     if (insertError) {
@@ -118,19 +120,13 @@ Deno.serve(async (req) => {
       id: created.user.id,
       email: demo.email,
       role,
-      institution_id: institutionId
+      institution_id: institutionId,
+      is_admin: institutionId === "PROF-001" && role === "professor",
+      must_change_password: false
     };
   }
 
   if (!profile?.email) return response({ error: "Invalid ID or password." }, 401);
-
-  // Restore the public demo credential if a previous demo session changed it.
-  if (demo && demo.role === role && password === expectedDemoPassword) {
-    const { error: resetError } = await admin.auth.admin.updateUserById(profile.id, {
-      password: expectedDemoPassword
-    });
-    if (resetError) console.warn("Unable to restore demo password:", resetError.message);
-  }
 
   const authClient = createClient(supabaseUrl, publishableKey, {
     auth: { persistSession: false, autoRefreshToken: false }
@@ -154,7 +150,9 @@ Deno.serve(async (req) => {
     profile: {
       id: profile.id,
       institution_id: profile.institution_id,
-      role: profile.role
+      role: profile.role,
+      is_admin: Boolean(profile.is_admin),
+      must_change_password: Boolean(profile.must_change_password)
     }
   });
 });
