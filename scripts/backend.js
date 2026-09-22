@@ -400,11 +400,14 @@ class StudySyncBackend {
 
   async inviteGroupMember(groupId, institutionId) {
     if (!this.configured || !this.user) return { institution_id: institutionId };
-    const { data, error } = await this.client.rpc("invite_group_member", {
-      p_group_id: groupId,
-      p_institution_id: String(institutionId || "").trim()
+    const { data, error } = await this.client.functions.invoke("invite-group-member", {
+      body: {
+        group_id: groupId,
+        institution_id: String(institutionId || "").trim()
+      }
     });
     if (error) throw mapSupabaseError(error, "Unable to invite member.");
+    if (data?.error) throw new Error(data.error);
     return data;
   }
 
