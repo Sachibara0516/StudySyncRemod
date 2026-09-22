@@ -124,7 +124,7 @@ class StudySyncBackend {
     if (!this.client || !this.user) return null;
     const { data, error } = await this.client
       .from("profiles")
-      .select("id,institution_id,role,display_name,email_notifications")
+      .select("id,institution_id,role,display_name,email_notifications,is_admin,must_change_password,password_changed_at,password_reset_at")
       .eq("id", this.user.id)
       .single();
     if (error) throw mapSupabaseError(error, "Unable to load account profile.");
@@ -151,7 +151,7 @@ class StudySyncBackend {
       return { user: this.user, profile: this.profile, offline: true };
     }
 
-    const { data, error } = await this.client.functions.invoke("auth-id-login", {
+    const { data, error } = await this.client.functions.invoke("secure-id-login", {
       body: {
         role: normalizedRole,
         institution_id: id,
@@ -555,8 +555,13 @@ class StudySyncBackend {
   }
 
   async updatePassword(oldPassword, newPassword) {
-    if (String(newPassword || "").length < 8) {
-      throw new Error("New password must be at least 8 characters.");
+    const nextPassword = String(newPassword || "");
+    if (nextPassword.length < 12
+      || !/[a-z]/.test(nextPassword)
+      || !/[A-Z]/.test(nextPassword)
+      || !/\d/.test(nextPassword)
+      || !/[^A-Za-z0-9]/.test(nextPassword)) {
+      throw new Error("New password must be at least 12 characters and include uppercase, lowercase, number, and symbol.");
     }
     if (!this.configured || !this.user) return true;
 
@@ -565,9 +570,36 @@ class StudySyncBackend {
     if (!institutionId || !role) throw new Error("Account profile is incomplete.");
 
     await this.signIn({ role, institutionId, password: oldPassword });
-    const { error } = await this.client.auth.updateUser({ password: newPassword });
+    const { error } = await this.client.auth.updateUser({ password: nextPassword });
     if (error) throw mapSupabaseError(error, "Unable to update password.");
+
+    const { data: securityData, error: securityError } = await this.client.functions.invoke("account-security", {
+      body: { action: "mark_changed" }
+    });
+    if (securityError || data?.error) {
+      console.warn("Password changed but security state could not be cleared:", securityError || securityData?.error);
+    } else if (this.profile) {
+      this.profile.must_change_password = false;
+      this.profile.password_changed_at = new Date().toISOString();
+    }
     return true;
+  }
+
+  async adminResetPassword(targetInstitutionId, newPassword) {
+    if (!this.configured || !this.user) throw new Error("Administrator tools require the connected backend.");
+    if (!this.profile?.is_admin) throw new Error("Administrator permission required.");
+
+    const { data, error } = await this.client.functions.invoke("account-security", {
+      body: {
+        action: "admin_reset",
+        target_institution_id: String(targetInstitutionId || "").trim(),
+        new_password: String(newPassword || "")
+      }
+    });
+
+    if (error) throw mapSupabaseError(error, "Unable to reset password.");
+    if (data?.error) throw new Error(data.error);
+    return data;
   }
 
   async askAI(prompt) {
