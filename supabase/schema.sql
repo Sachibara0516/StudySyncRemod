@@ -14,8 +14,24 @@ create table if not exists public.profiles (
   role text not null default 'student' check (role in ('student','professor')),
   display_name text not null default '',
   email_notifications boolean not null default false,
+  is_admin boolean not null default false,
+  must_change_password boolean not null default false,
+  password_changed_at timestamptz,
+  password_reset_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+
+create table if not exists public.password_reset_audit (
+  id uuid primary key default gen_random_uuid(),
+  admin_user_id uuid,
+  admin_institution_id text,
+  target_user_id uuid not null,
+  target_institution_id text not null,
+  target_role text not null check (target_role in ('student','professor')),
+  event text not null check (event in ('admin_reset','user_changed')),
+  created_at timestamptz not null default now()
 );
 
 create table if not exists public.tasks (
@@ -85,6 +101,8 @@ create table if not exists public.group_messages (
 );
 
 create index if not exists profiles_institution_id_idx on public.profiles(institution_id);
+create index if not exists password_reset_audit_target_idx on public.password_reset_audit(target_user_id, created_at desc);
+create index if not exists password_reset_audit_admin_idx on public.password_reset_audit(admin_user_id, created_at desc);
 create index if not exists tasks_owner_due_idx on public.tasks(owner_id, due_date);
 create index if not exists notes_owner_idx on public.notes(owner_id);
 create index if not exists assignments_owner_idx on public.assignments(owner_id);
@@ -94,6 +112,26 @@ create index if not exists group_files_group_idx on public.group_files(group_id,
 create index if not exists group_files_uploader_idx on public.group_files(uploader_id);
 create index if not exists group_messages_group_created_idx on public.group_messages(group_id, created_at);
 create index if not exists group_messages_sender_idx on public.group_messages(sender_id);
+
+
+create or replace function private.apply_profile_security_defaults()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if new.institution_id = 'PROF-001' and new.role = 'professor' then
+    new.is_admin = true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_security_defaults on public.profiles;
+create trigger profiles_security_defaults
+before insert on public.profiles
+for each row execute function private.apply_profile_security_defaults();
 
 create or replace function private.set_updated_at()
 returns trigger
@@ -167,6 +205,7 @@ grant execute on function private.is_group_member(uuid) to authenticated;
 grant execute on function private.is_group_admin(uuid) to authenticated;
 
 alter table public.profiles enable row level security;
+alter table public.password_reset_audit enable row level security;
 alter table public.tasks enable row level security;
 alter table public.notes enable row level security;
 alter table public.assignments enable row level security;
@@ -291,6 +330,8 @@ drop policy if exists group_messages_delete_sender on public.group_messages;
 create policy group_messages_delete_sender on public.group_messages
 for delete to authenticated
 using (sender_id = (select auth.uid()));
+
+revoke all on public.password_reset_audit from anon, authenticated;
 
 revoke all on public.profiles from anon, authenticated;
 grant select on public.profiles to authenticated;
