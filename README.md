@@ -110,3 +110,19 @@ Live Supabase project status:
 - offline demo fallback: disabled by default
 
 The connected Supabase connector does not expose Auth user creation, and the platform blocks credential-bearing provisioning workarounds. Therefore no plaintext-password test account was created automatically. Create real Auth users through the Supabase Auth UI or a trusted server/admin script, then add matching rows to `public.profiles` with their institution ID and role. Once those users exist, the current login bridge and all Supabase-backed functionality are ready to operate against the live project.
+
+
+## Demo accounts
+
+StudySyncRemod includes two self-provisioning demo identities. The corresponding Supabase Auth user and `public.profiles` row are created automatically on the first valid login.
+
+- Student
+  - ID: `22-12345`
+  - Password: `StudySyncDemo!22-12345`
+  - Role: Student
+- Teacher
+  - ID: `PROF-001`
+  - Password: `StudySyncDemo!PROF-001`
+  - Role in the current UI/backend schema: Professor
+
+These are intentionally public demo credentials. The login Edge Function restores the expected demo password on valid demo login so the shared demonstration account remains recoverable.
