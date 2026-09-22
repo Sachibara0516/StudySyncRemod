@@ -44,7 +44,7 @@ StudySyncRemod now supports:
 
 ## Supabase setup
 
-A live Supabase project was not available through the connected Supabase account while this refactor was performed, so no production database was modified.
+StudySyncRemod is now bound to the live Supabase project `ttymifynuwkcaxmxgxrh` in Singapore (`ap-southeast-1`) at `https://ttymifynuwkcaxmxgxrh.supabase.co`.
 
 To activate the integration:
 
@@ -94,4 +94,19 @@ For production, set:
 
 ## Current verification status
 
-The repository-side integration and static application paths are implemented. Final live verification still requires a connected Supabase project so that the schema can be applied, the Edge Function deployed, test users provisioned, and RLS/storage behavior tested against the actual project.
+Live Supabase project status:
+
+- project: `StudySyncRemod`
+- project ref: `ttymifynuwkcaxmxgxrh`
+- region: Singapore (`ap-southeast-1`)
+- database schema: applied
+- RLS: enabled on all application tables
+- private Storage buckets: created
+- Realtime publication: configured for group chat
+- `auth-id-login` Edge Function: active
+- `invite-group-member` Edge Function: active and JWT-protected
+- Supabase security advisor: clean (0 findings)
+- frontend service layer: bound directly to the live project
+- offline demo fallback: disabled by default
+
+The connected Supabase connector does not expose Auth user creation, and the platform blocks credential-bearing provisioning workarounds. Therefore no plaintext-password test account was created automatically. Create real Auth users through the Supabase Auth UI or a trusted server/admin script, then add matching rows to `public.profiles` with their institution ID and role. Once those users exist, the current login bridge and all Supabase-backed functionality are ready to operate against the live project.
