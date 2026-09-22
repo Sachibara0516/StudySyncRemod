@@ -1,11 +1,16 @@
 {
-  "name": "studysync",
-  "version": "1.0.0",
-  "description": "StudySync Web Version",
+  "name": "studysync-remod",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "StudySync academic workspace with Supabase-backed authentication, persistence, storage, and realtime collaboration.",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "vercel dev"
   },
   "dependencies": {
-    "axios": "^1.4.0"
+    "@supabase/supabase-js": "2.116.0"
   }
 }
