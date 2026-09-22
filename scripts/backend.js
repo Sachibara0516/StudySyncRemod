@@ -332,6 +332,12 @@ class StudySyncBackend {
     if (file.size > MAX_UPLOAD_BYTES) throw new Error("Files must be 20 MB or smaller.");
     if (!this.configured || !this.user) return { name: file.name, storage_path: null, offline: true };
 
+    const { data: previous } = await this.client.from("assignments")
+      .select("storage_path")
+      .eq("owner_id", this.user.id)
+      .eq("assignment_key", assignmentKey)
+      .maybeSingle();
+
     const path = `${this.user.id}/${encodeURIComponent(assignmentKey)}/${crypto.randomUUID()}-${safeFilename(file.name)}`;
     const { error: uploadError } = await this.client.storage.from("assignments").upload(path, file, {
       cacheControl: "3600",
@@ -351,6 +357,12 @@ class StudySyncBackend {
       await this.client.storage.from("assignments").remove([path]);
       throw mapSupabaseError(error, "Unable to save assignment metadata.");
     }
+
+    if (previous?.storage_path && previous.storage_path !== path) {
+      const { error: cleanupError } = await this.client.storage.from("assignments").remove([previous.storage_path]);
+      if (cleanupError) console.warn("Old assignment cleanup failed:", cleanupError);
+    }
+
     return { name: data.file_name, storage_path: data.storage_path };
   }
 
@@ -399,6 +411,19 @@ class StudySyncBackend {
 
   async deleteGroup(groupId) {
     if (!this.configured || !this.user) return;
+
+    const { data: fileRows, error: listError } = await this.client
+      .from("group_files")
+      .select("storage_path")
+      .eq("group_id", groupId);
+    if (listError) throw mapSupabaseError(listError, "Unable to prepare group deletion.");
+
+    const paths = (fileRows || []).map(row => row.storage_path).filter(Boolean);
+    if (paths.length) {
+      const { error: storageError } = await this.client.storage.from("group-files").remove(paths);
+      if (storageError) throw mapSupabaseError(storageError, "Unable to remove group files.");
+    }
+
     const { error } = await this.client.from("groups").delete().eq("id", groupId);
     if (error) throw mapSupabaseError(error, "Unable to delete group.");
   }
