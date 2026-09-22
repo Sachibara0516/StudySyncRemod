@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false }
   });
 
-  const { data: profile, error: profileError } = await admin
+  let { data: profile, error: profileError } = await admin
     .from("profiles")
     .select("id,email,role,institution_id")
     .eq("institution_id", institutionId)
@@ -67,7 +67,70 @@ Deno.serve(async (req) => {
     console.error("Profile lookup failed:", profileError.message);
     return response({ error: "Invalid ID or password." }, 401);
   }
+
+  // Public demo accounts are provisioned only on first valid login.
+  // The password is derived at runtime so no plaintext account credential
+  // is stored in the repository or deployment configuration.
+  const demoAccounts: Record<string, { role: string; email: string; display_name: string }> = {
+    "22-12345": {
+      role: "student",
+      email: "student.22-12345@studysync.local",
+      display_name: "Sample Student"
+    },
+    "PROF-001": {
+      role: "professor",
+      email: "teacher.prof-001@studysync.local",
+      display_name: "Sample Teacher"
+    }
+  };
+
+  const demo = demoAccounts[institutionId];
+  const expectedDemoPassword = demo ? "StudySyncDemo!" + institutionId : null;
+
+  if (!profile?.email && demo && demo.role === role && password === expectedDemoPassword) {
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email: demo.email,
+      password: expectedDemoPassword,
+      email_confirm: true
+    });
+
+    if (createError || !created.user) {
+      console.error("Demo user creation failed:", createError?.message);
+      return response({ error: "Unable to initialize demo account." }, 503);
+    }
+
+    const { error: insertError } = await admin.from("profiles").insert({
+      id: created.user.id,
+      email: demo.email,
+      institution_id: institutionId,
+      role,
+      display_name: demo.display_name,
+      email_notifications: false
+    });
+
+    if (insertError) {
+      await admin.auth.admin.deleteUser(created.user.id);
+      console.error("Demo profile creation failed:", insertError.message);
+      return response({ error: "Unable to initialize demo account." }, 503);
+    }
+
+    profile = {
+      id: created.user.id,
+      email: demo.email,
+      role,
+      institution_id: institutionId
+    };
+  }
+
   if (!profile?.email) return response({ error: "Invalid ID or password." }, 401);
+
+  // Restore the public demo credential if a previous demo session changed it.
+  if (demo && demo.role === role && password === expectedDemoPassword) {
+    const { error: resetError } = await admin.auth.admin.updateUserById(profile.id, {
+      password: expectedDemoPassword
+    });
+    if (resetError) console.warn("Unable to restore demo password:", resetError.message);
+  }
 
   const authClient = createClient(supabaseUrl, publishableKey, {
     auth: { persistSession: false, autoRefreshToken: false }
