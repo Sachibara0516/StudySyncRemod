@@ -206,6 +206,14 @@ grant execute on function private.is_group_admin(uuid) to authenticated;
 
 alter table public.profiles enable row level security;
 alter table public.password_reset_audit enable row level security;
+
+drop policy if exists password_reset_audit_deny_clients on public.password_reset_audit;
+create policy password_reset_audit_deny_clients
+on public.password_reset_audit
+for all
+to anon, authenticated
+using (false)
+with check (false);
 alter table public.tasks enable row level security;
 alter table public.notes enable row level security;
 alter table public.assignments enable row level security;
