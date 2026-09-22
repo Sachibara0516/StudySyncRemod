@@ -1,3 +1,5 @@
+import { backend } from "./backend.js";
+
 // Simple SPA router-like structure to manage screens and pages
 const mainWindow = document.getElementById("main-window");
 const loginWindow = document.getElementById("login-window");
@@ -72,34 +74,49 @@ function safeText(text) {
 
 // Unique ID generator
 function generateId() {
-    return '_' + Math.random().toString(36).substr(2, 9);
+    return crypto.randomUUID();
+}
+
+const noteSaveTimers = new Map();
+function scheduleNoteSave(noteKey, value) {
+    clearTimeout(noteSaveTimers.get(noteKey));
+    noteSaveTimers.set(noteKey, setTimeout(async () => {
+        try {
+            await backend.saveNote(noteKey, value);
+        } catch (error) {
+            console.error("Failed to sync note:", error);
+        }
+    }, 500));
+}
+
+async function hydrateFromBackend() {
+    const state = await backend.hydrateState({
+        notes: SAVED_NOTES,
+        assignments: SUBMITTED_ASSIGNMENTS,
+        tasks: SHARED_TASKS,
+        groups: GROUPS_DATA,
+        members: GROUP_MEMBERS,
+        files: GROUP_FILES,
+        chats: GROUP_CHATS
+    });
+
+    SAVED_NOTES = state.notes || {};
+    SUBMITTED_ASSIGNMENTS = state.assignments || {};
+    SHARED_TASKS = state.tasks || [];
+    GROUPS_DATA = state.groups || [];
+    GROUP_MEMBERS = state.members || {};
+    GROUP_FILES = state.files || {};
+    GROUP_CHATS = state.chats || {};
+    saveAllToLocalStorage();
 }
 
 // Role and user tracking
 let currentUserRole = null;
 let currentStudentNo = null;
 
-// AI API integration
-const OPENAI_API_KEY = 'your_api_key_here'; // Replace with actual or integrate secure backend proxy
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-
+// AI requests are proxied through a protected server endpoint.
 async function getAIResponse(prompt) {
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
-    };
-    const data = {
-        model: 'gpt-4',
-        messages: [{ role: 'user', content: prompt }]
-    };
-    try {
-        const response = await axios.post(OPENAI_API_URL, data, { headers });
-        const content = response.data?.choices?.[0]?.message?.content || 'No response';
-        return content;
-    } catch (err) {
-        console.error('Error calling OpenAI:', err);
-        throw new Error('Failed to get AI response.');
-    }
+    return backend.askAI(prompt);
 }
 
 // Login flow
@@ -157,8 +174,8 @@ document.getElementById("toggle-password").addEventListener('click', () => {
 loginForm.addEventListener('submit', async e => {
     e.preventDefault();
     loginMessage.textContent = "";
-    let idVal = idInput.value.trim();
-    let pwVal = passwordInput.value.trim();
+    const idVal = idInput.value.trim();
+    const pwVal = passwordInput.value;
 
     if (currentUserRole === "Student" && !validateStudentNoFormat(idVal)) {
         loginMessage.textContent = "Please enter a valid student number (e.g., 22-12345).";
@@ -169,18 +186,23 @@ loginForm.addEventListener('submit', async e => {
         return;
     }
 
+    loginSubmitBtn.disabled = true;
     try {
-        // Simulate server validation
-        if (currentUserRole === "Student") {
-            currentStudentNo = idVal;
-            // Extend here: validate against real DB
-            // For demo, accept any password
-        } else {
-            currentStudentNo = null;
-        }
+        const session = await backend.signIn({
+            role: currentUserRole,
+            institutionId: idVal,
+            password: pwVal
+        });
+        await hydrateFromBackend();
+        currentStudentNo = currentUserRole === "Student"
+            ? (session.profile?.institution_id || idVal)
+            : null;
         showWelcomeWindow(currentStudentNo);
     } catch (err) {
-        loginMessage.textContent = "Login failed. Please try again.";
+        console.error("Login failed:", err);
+        loginMessage.textContent = err?.message || "Login failed. Please try again.";
+    } finally {
+        loginSubmitBtn.disabled = false;
     }
 });
 
@@ -239,6 +261,7 @@ function displayPage(pageName) {
 }
 
 function clearContentArea() {
+    backend.unsubscribeGroup();
     contentArea.innerHTML = "";
 }
 
@@ -512,6 +535,7 @@ function showSubjectDetail(subjectName) {
             notesTextarea.addEventListener('input', () => {
                 SAVED_NOTES[noteKey] = notesTextarea.value;
                 setLocalData(STORAGE_KEY_NOTES, SAVED_NOTES);
+                scheduleNoteSave(noteKey, notesTextarea.value);
             });
 
             sectionFrame.appendChild(notesTextarea);
@@ -549,28 +573,43 @@ function showSubjectDetail(subjectName) {
                     const fileInput = document.createElement('input');
                     fileInput.type = 'file';
                     fileInput.accept = '*/*';
-                    fileInput.onchange = () => {
+                    fileInput.onchange = async () => {
                         const file = fileInput.files[0];
                         if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                            SUBMITTED_ASSIGNMENTS[assignKey] = file.name;
+                        uploadBtn.disabled = true;
+                        uploadBtn.textContent = 'Uploading...';
+                        try {
+                            const record = await backend.uploadAssignment(assignKey, file);
+                            SUBMITTED_ASSIGNMENTS[assignKey] = record;
                             setLocalData(STORAGE_KEY_ASSIGNMENTS, SUBMITTED_ASSIGNMENTS);
                             uploadBtn.textContent = 'Uploaded ✔️';
-                            uploadBtn.disabled = true;
                             viewBtn.disabled = false;
                             alert(`Uploaded file: ${file.name}`);
-                        };
-                        reader.readAsDataURL(file);
+                        } catch (error) {
+                            uploadBtn.disabled = false;
+                            uploadBtn.textContent = 'Upload File';
+                            alert(error?.message || 'Upload failed.');
+                        }
                     };
                     fileInput.click();
                 });
 
-                viewBtn.addEventListener('click', () => {
-                    if (SUBMITTED_ASSIGNMENTS[assignKey]) {
-                        alert(`Viewing submitted file: ${SUBMITTED_ASSIGNMENTS[assignKey]}`);
-                    } else {
+                viewBtn.addEventListener('click', async () => {
+                    const record = SUBMITTED_ASSIGNMENTS[assignKey];
+                    if (!record) {
                         alert('No file uploaded yet.');
+                        return;
+                    }
+                    const normalized = typeof record === 'string' ? { name: record } : record;
+                    try {
+                        const url = await backend.getAssignmentUrl(normalized);
+                        if (url) {
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                        } else {
+                            alert(`Submitted file: ${normalized.name || 'Uploaded file'}`);
+                        }
+                    } catch (error) {
+                        alert(error?.message || 'Unable to open the submitted file.');
                     }
                 });
 
@@ -669,30 +708,51 @@ function renderCalendarPage() {
             refreshTodoList();
         });
 
-        li.addEventListener('dblclick', () => {
-            // On double-click toggle completion immediately
-            SHARED_TASKS[idx].completed = !SHARED_TASKS[idx].completed;
+        li.addEventListener('dblclick', async () => {
+            const previous = SHARED_TASKS[idx].completed;
+            SHARED_TASKS[idx].completed = !previous;
             saveAllToLocalStorage();
             refreshTodoList();
+            try {
+                SHARED_TASKS[idx] = await backend.updateTask(SHARED_TASKS[idx]);
+                saveAllToLocalStorage();
+            } catch (error) {
+                SHARED_TASKS[idx].completed = previous;
+                saveAllToLocalStorage();
+                refreshTodoList();
+                alert(error?.message || 'Unable to update task.');
+            }
         });
 
         todoList.appendChild(li);
     });
 }
 
-    todoAddBtn.addEventListener('click', () => {
-        const title = prompt('Enter new To-do task title:');
+    todoAddBtn.addEventListener('click', async () => {
+        const title = prompt('Enter new To-do task title:')?.trim();
         if (!title) return;
-        const due_date = prompt('Enter due date (YYYY-MM-DD):');
+        if (title.length > 200) {
+            alert('Task title must be 200 characters or fewer.');
+            return;
+        }
+        const due_date = prompt('Enter due date (YYYY-MM-DD):')?.trim() || '';
         if (due_date && !isValidDate(due_date)) {
             alert('Invalid date format. Please use YYYY-MM-DD.');
             return;
         }
-        SHARED_TASKS.push({ title, due_date: due_date || '', description: '', completed: false });
-        saveAllToLocalStorage();
-        selectedTaskIndex = -1; // reset selection when new task added
-        updateDeleteButtonState();
-        refreshTodoList();
+        todoAddBtn.disabled = true;
+        try {
+            const task = await backend.createTask({ title, due_date, description: '', completed: false });
+            SHARED_TASKS.push(task);
+            saveAllToLocalStorage();
+            selectedTaskIndex = -1;
+            updateDeleteButtonState();
+            refreshTodoList();
+        } catch (error) {
+            alert(error?.message || 'Unable to create task.');
+        } finally {
+            todoAddBtn.disabled = false;
+        }
     });
 
     // Populate incoming activities - static as example
@@ -706,16 +766,23 @@ function renderCalendarPage() {
     const todoDeleteBtn = clone.querySelector('#todo-delete-btn');
     todoDeleteBtn.disabled = true; // initially disabled
 
-    todoDeleteBtn.addEventListener('click', () => {
-        if (selectedTaskIndex === -1) return; // no selection
+    todoDeleteBtn.addEventListener('click', async () => {
+        if (selectedTaskIndex === -1) return;
 
         const task = SHARED_TASKS[selectedTaskIndex];
-        if (confirm(`Delete task: "${task.title}"? This action cannot be undone.`)) {
+        if (!confirm(`Delete task: "${task.title}"? This action cannot be undone.`)) return;
+
+        todoDeleteBtn.disabled = true;
+        try {
+            await backend.deleteTask(task);
             SHARED_TASKS.splice(selectedTaskIndex, 1);
-            selectedTaskIndex = -1; // reset selection
+            selectedTaskIndex = -1;
             saveAllToLocalStorage();
             updateDeleteButtonState();
             refreshTodoList();
+        } catch (error) {
+            alert(error?.message || 'Unable to delete task.');
+            updateDeleteButtonState();
         }
     });
 
@@ -928,24 +995,36 @@ function renderGroupInitialPage() {
 
     reloadGroupList();
 
-    createGroupBtn.addEventListener('click', () => {
+    createGroupBtn.addEventListener('click', async () => {
         const name = newGroupInput.value.trim();
         if (!name) {
             alert("Please enter a group name.");
             return;
         }
-        // Simple check: no duplicate
+        if (name.length > 120) {
+            alert("Group name must be 120 characters or fewer.");
+            return;
+        }
         if (GROUPS_DATA.some(g => g.group_name.toLowerCase() === name.toLowerCase())) {
             alert("Group name already exists.");
             return;
         }
-        // Add group
-        const newGroup = { group_name: name, group_id: generateId() };
-        GROUPS_DATA.push(newGroup);
-        setLocalData(STORAGE_KEY_GROUPS, GROUPS_DATA);
-        newGroupInput.value = '';
-        reloadGroupList();
-        alert(`Group "${name}" created.`);
+
+        createGroupBtn.disabled = true;
+        try {
+            const newGroup = await backend.createGroup(name);
+            GROUPS_DATA.push(newGroup);
+            const ownerId = backend.status().profile?.institution_id || currentStudentNo;
+            if (ownerId) GROUP_MEMBERS[newGroup.group_id] = [ownerId];
+            saveAllToLocalStorage();
+            newGroupInput.value = '';
+            reloadGroupList();
+            alert(`Group "${name}" created.`);
+        } catch (error) {
+            alert(error?.message || 'Unable to create group.');
+        } finally {
+            createGroupBtn.disabled = false;
+        }
     });
 
     contentArea.appendChild(clone);
@@ -989,13 +1068,12 @@ function renderGroupDetailsPage(groupId, groupName) {
     }
     reloadMembers();
 
-    inviteBtn.addEventListener('click', () => {
+    inviteBtn.addEventListener('click', async () => {
         const newMember = inviteInput.value.trim();
         if (!newMember) {
             alert("Enter student ID to invite.");
             return;
         }
-        // Check format
         if (!validateStudentNoFormat(newMember)) {
             alert("Invalid student ID format. Use e.g. 22-12345.");
             return;
@@ -1004,21 +1082,38 @@ function renderGroupDetailsPage(groupId, groupName) {
             alert("Member already in group.");
             return;
         }
-        members.push(newMember);
-        GROUP_MEMBERS[groupId] = members;
-        setLocalData(STORAGE_KEY_GROUPS_MEMBERS, GROUP_MEMBERS);
-        inviteInput.value = '';
-        reloadMembers();
-        alert(`Member ${newMember} invited.`);
-    });
-
-    leaveBtn.addEventListener('click', () => {
-        if (confirm("Are you sure you want to leave this group?")) {
-            members = members.filter(m => m !== currentStudentNo);
+        inviteBtn.disabled = true;
+        try {
+            const invited = await backend.inviteGroupMember(groupId, newMember);
+            const memberId = invited?.institution_id || newMember;
+            if (!members.includes(memberId)) members.push(memberId);
             GROUP_MEMBERS[groupId] = members;
             setLocalData(STORAGE_KEY_GROUPS_MEMBERS, GROUP_MEMBERS);
+            inviteInput.value = '';
+            reloadMembers();
+            alert(`Member ${memberId} invited.`);
+        } catch (error) {
+            alert(error?.message || 'Unable to invite member.');
+        } finally {
+            inviteBtn.disabled = false;
+        }
+    });
+
+    leaveBtn.addEventListener('click', async () => {
+        if (!confirm("Are you sure you want to leave this group?")) return;
+        leaveBtn.disabled = true;
+        try {
+            await backend.leaveGroup(groupId);
+            const selfId = backend.status().profile?.institution_id || currentStudentNo;
+            members = members.filter(m => m !== selfId);
+            GROUP_MEMBERS[groupId] = members;
+            GROUPS_DATA = GROUPS_DATA.filter(g => g.group_id !== groupId);
+            saveAllToLocalStorage();
             alert("You left the group.");
             displayPage('Group');
+        } catch (error) {
+            alert(error?.message || 'Unable to leave group.');
+            leaveBtn.disabled = false;
         }
     });
 
@@ -1040,6 +1135,14 @@ function renderGroupDetailsPage(groupId, groupName) {
                 selectedFileIndex = idx;
                 deleteFileBtn.disabled = false;
             });
+            li.addEventListener('dblclick', async () => {
+                try {
+                    const url = await backend.getGroupFileUrl(file);
+                    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                } catch (error) {
+                    alert(error?.message || 'Unable to open file.');
+                }
+            });
             fileList.appendChild(li);
         });
         deleteFileBtn.disabled = true;
@@ -1052,25 +1155,41 @@ function renderGroupDetailsPage(groupId, groupName) {
         uploadInput.click();
     });
 
-    uploadInput.addEventListener('change', () => {
+    uploadInput.addEventListener('change', async () => {
         const file = uploadInput.files[0];
         if (!file) return;
-        files.push({ name: file.name });
-        GROUP_FILES[groupId] = files;
-        setLocalData(STORAGE_KEY_GROUPS_FILES, GROUP_FILES);
-        reloadFiles();
-        alert(`File "${file.name}" uploaded.`);
-        uploadInput.value = '';
+        uploadBtn.disabled = true;
+        try {
+            const record = await backend.uploadGroupFile(groupId, file);
+            files.push(record);
+            GROUP_FILES[groupId] = files;
+            setLocalData(STORAGE_KEY_GROUPS_FILES, GROUP_FILES);
+            reloadFiles();
+            alert(`File "${file.name}" uploaded.`);
+        } catch (error) {
+            alert(error?.message || 'Unable to upload file.');
+        } finally {
+            uploadBtn.disabled = false;
+            uploadInput.value = '';
+        }
     });
 
     // Delete File
-    deleteFileBtn.addEventListener('click', () => {
+    deleteFileBtn.addEventListener('click', async () => {
         if (selectedFileIndex === -1) return;
-        if (!confirm(`Delete file "${files[selectedFileIndex].name}"? This cannot be undone.`)) return;
-        files.splice(selectedFileIndex, 1);
-        GROUP_FILES[groupId] = files;
-        setLocalData(STORAGE_KEY_GROUPS_FILES, GROUP_FILES);
-        reloadFiles();
+        const file = files[selectedFileIndex];
+        if (!confirm(`Delete file "${file.name}"? This cannot be undone.`)) return;
+        deleteFileBtn.disabled = true;
+        try {
+            await backend.deleteGroupFile(file);
+            files.splice(selectedFileIndex, 1);
+            GROUP_FILES[groupId] = files;
+            setLocalData(STORAGE_KEY_GROUPS_FILES, GROUP_FILES);
+            reloadFiles();
+        } catch (error) {
+            alert(error?.message || 'Unable to delete file.');
+            deleteFileBtn.disabled = false;
+        }
     });
 
     // Group Chat
@@ -1079,21 +1198,40 @@ function renderGroupDetailsPage(groupId, groupName) {
         chatList.innerHTML = '';
         chats.forEach(chat => {
             const li = document.createElement('li');
-            li.textContent = chat;
+            li.textContent = typeof chat === 'string' ? chat : (chat.text || `${chat.sender_label || 'User'}: ${chat.body || ''}`);
             chatList.appendChild(li);
         });
         chatList.scrollTop = chatList.scrollHeight;
     }
-    reloadChats();
-
-    sendChatBtn.addEventListener('click', () => {
-        const msg = chatInput.value.trim();
-        if (!msg) return;
-        chats.push(`${currentStudentNo || 'User'}: ${msg}`);
+    function appendChat(chat) {
+        if (!chat) return;
+        if (chat.id && chats.some(existing => typeof existing === 'object' && existing.id === chat.id)) return;
+        chats.push(chat);
         GROUP_CHATS[groupId] = chats;
         setLocalData(STORAGE_KEY_GROUPS_CHATS, GROUP_CHATS);
-        chatInput.value = '';
         reloadChats();
+    }
+    reloadChats();
+    backend.subscribeToGroupMessages(groupId, appendChat);
+
+    sendChatBtn.addEventListener('click', async () => {
+        const msg = chatInput.value.trim();
+        if (!msg) return;
+        if (msg.length > 4000) {
+            alert('Messages must be 4000 characters or fewer.');
+            return;
+        }
+        sendChatBtn.disabled = true;
+        try {
+            const chat = await backend.sendGroupMessage(groupId, msg);
+            appendChat(chat);
+            chatInput.value = '';
+        } catch (error) {
+            alert(error?.message || 'Unable to send message.');
+        } finally {
+            sendChatBtn.disabled = false;
+            chatInput.focus();
+        }
     });
 
     chatInput.addEventListener('keydown', (e) => {
@@ -1104,18 +1242,22 @@ function renderGroupDetailsPage(groupId, groupName) {
     });
 
     // Delete Group
-    deleteGroupBtn.addEventListener('click', () => {
+    deleteGroupBtn.addEventListener('click', async () => {
         if (!confirm(`Delete group "${groupName}" and all its data? This cannot be undone.`)) return;
-        GROUPS_DATA = GROUPS_DATA.filter(g => g.group_id !== groupId);
-        delete GROUP_MEMBERS[groupId];
-        delete GROUP_FILES[groupId];
-        delete GROUP_CHATS[groupId];
-        setLocalData(STORAGE_KEY_GROUPS, GROUPS_DATA);
-        setLocalData(STORAGE_KEY_GROUPS_MEMBERS, GROUP_MEMBERS);
-        setLocalData(STORAGE_KEY_GROUPS_FILES, GROUP_FILES);
-        setLocalData(STORAGE_KEY_GROUPS_CHATS, GROUP_CHATS);
-        alert(`Group "${groupName}" deleted.`);
-        displayPage('Group');
+        deleteGroupBtn.disabled = true;
+        try {
+            await backend.deleteGroup(groupId);
+            GROUPS_DATA = GROUPS_DATA.filter(g => g.group_id !== groupId);
+            delete GROUP_MEMBERS[groupId];
+            delete GROUP_FILES[groupId];
+            delete GROUP_CHATS[groupId];
+            saveAllToLocalStorage();
+            alert(`Group "${groupName}" deleted.`);
+            displayPage('Group');
+        } catch (error) {
+            alert(error?.message || 'Unable to delete group.');
+            deleteGroupBtn.disabled = false;
+        }
     });
 
     clone.querySelector('#back-to-groups').addEventListener('click', () => displayPage('Group'));
@@ -1123,7 +1265,7 @@ function renderGroupDetailsPage(groupId, groupName) {
     contentArea.appendChild(clone);
 }
 
-function renderSettingsPage() {
+async function renderSettingsPage() {
     clearContentArea();
 
     const template = document.getElementById('page-setting-template');
@@ -1137,10 +1279,16 @@ function renderSettingsPage() {
     const saveBtn = clone.querySelector('#save-settings-btn');
     const updatePassBtn = clone.querySelector('#update-password-btn');
 
-    // Load settings from localStorage or default
-    const settings = JSON.parse(localStorage.getItem('studysync_settings') || '{}');
+    // Load settings from Supabase when connected, otherwise use the local fallback.
+    const localSettings = JSON.parse(localStorage.getItem('studysync_settings') || '{}');
+    let settings = localSettings;
+    try {
+        settings = await backend.getSettings(localSettings);
+    } catch (error) {
+        console.warn('Failed to load remote settings:', error);
+    }
     displayNameInput.value = settings.displayName || '';
-    notifCheckbox.checked = settings.emailNotifications || false;
+    notifCheckbox.checked = Boolean(settings.emailNotifications);
 
     toggles.forEach(toggleBtn => {
         toggleBtn.addEventListener('click', () => {
@@ -1154,24 +1302,41 @@ function renderSettingsPage() {
         });
     });
 
-    updatePassBtn.addEventListener('click', () => {
-        const oldPass = oldPassInput.value.trim();
-        const newPass = newPassInput.value.trim();
+    updatePassBtn.addEventListener('click', async () => {
+        const oldPass = oldPassInput.value;
+        const newPass = newPassInput.value;
         if (!oldPass || !newPass) {
             alert('Please fill both old and new password fields.');
             return;
         }
-        // For demo, just confirm password change
-        alert('Password updated successfully.');
-        oldPassInput.value = '';
-        newPassInput.value = '';
+        updatePassBtn.disabled = true;
+        try {
+            await backend.updatePassword(oldPass, newPass);
+            alert('Password updated successfully.');
+            oldPassInput.value = '';
+            newPassInput.value = '';
+        } catch (error) {
+            alert(error?.message || 'Unable to update password.');
+        } finally {
+            updatePassBtn.disabled = false;
+        }
     });
 
-    saveBtn.addEventListener('click', () => {
-        settings.displayName = displayNameInput.value.trim();
-        settings.emailNotifications = notifCheckbox.checked;
-        localStorage.setItem('studysync_settings', JSON.stringify(settings));
-        alert('Settings saved.');
+    saveBtn.addEventListener('click', async () => {
+        const nextSettings = {
+            displayName: displayNameInput.value.trim().slice(0, 120),
+            emailNotifications: notifCheckbox.checked
+        };
+        saveBtn.disabled = true;
+        try {
+            settings = await backend.saveSettings(nextSettings);
+            localStorage.setItem('studysync_settings', JSON.stringify(settings));
+            alert('Settings saved.');
+        } catch (error) {
+            alert(error?.message || 'Unable to save settings.');
+        } finally {
+            saveBtn.disabled = false;
+        }
     });
 
     contentArea.appendChild(clone);
@@ -1518,9 +1683,15 @@ function saveAllToLocalStorage() {
     }
 }
 
-function logout() {
+async function logout() {
+    try {
+        await backend.signOut();
+    } catch (error) {
+        console.warn('Sign-out warning:', error);
+    }
     currentUserRole = null;
     currentStudentNo = null;
+    clearLoginForm();
     showScreen(mainWindow);
 }
 
@@ -1531,4 +1702,5 @@ function showDashboard() {
 
 
 // Initialize app
+backend.init().catch(error => console.warn('Backend initialization warning:', error));
 showScreen(mainWindow);
