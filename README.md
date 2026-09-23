@@ -1,5 +1,7 @@
 # StudySyncRemod
 
+**Live website:** https://study-sync-remod.vercel.app
+
 StudySyncRemod is the functional remaster of the original StudySync academic workspace.
 
 The visual structure and existing UI were intentionally preserved. This branch focuses on stronger application behavior, secure authentication, reliable persistence, real file storage, realtime collaboration, validation, and deployability.
